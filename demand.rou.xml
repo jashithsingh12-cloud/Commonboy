@@ -1,0 +1,21 @@
+<routes>
+    <vType id="straight" color="0,200,255" guiShape="passenger"/>
+    <vType id="left"     color="255,170,0" guiShape="passenger"/>
+    <vType id="right"    color="120,255,140" guiShape="passenger"/>
+
+    <flow id="N_st" type="straight" from="N_in" to="S_out" begin="0" end="600" probability="0.111"/>
+    <flow id="N_lf" type="left"     from="N_in" to="E_out" begin="0" end="600" probability="0.028"/>
+    <flow id="N_rt" type="right"    from="N_in" to="W_out" begin="0" end="600" probability="0.028"/>
+
+    <flow id="S_st" type="straight" from="S_in" to="N_out" begin="0" end="600" probability="0.111"/>
+    <flow id="S_lf" type="left"     from="S_in" to="W_out" begin="0" end="600" probability="0.028"/>
+    <flow id="S_rt" type="right"    from="S_in" to="E_out" begin="0" end="600" probability="0.028"/>
+
+    <flow id="E_st" type="straight" from="E_in" to="W_out" begin="0" end="600" probability="0.111"/>
+    <flow id="E_lf" type="left"     from="E_in" to="S_out" begin="0" end="600" probability="0.028"/>
+    <flow id="E_rt" type="right"    from="E_in" to="N_out" begin="0" end="600" probability="0.028"/>
+
+    <flow id="W_st" type="straight" from="W_in" to="E_out" begin="0" end="600" probability="0.111"/>
+    <flow id="W_lf" type="left"     from="W_in" to="N_out" begin="0" end="600" probability="0.028"/>
+    <flow id="W_rt" type="right"    from="W_in" to="S_out" begin="0" end="600" probability="0.028"/>
+</routes>

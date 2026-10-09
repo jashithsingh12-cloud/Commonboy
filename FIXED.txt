@@ -1,0 +1,25 @@
+FIXED
+               file  avg_wait    queue  max_queue
+metrics_fixed_1.csv  2.562178 6.360429         24
+metrics_fixed_2.csv  2.850638 7.551672         19
+metrics_fixed_3.csv  2.814862 6.472477         17
+metrics_fixed_4.csv  2.748178 6.718224         23
+metrics_fixed_5.csv  2.663100 6.398176         20
+
+ADAPTIVE
+                  file  avg_wait    queue  max_queue
+metrics_adaptive_1.csv  1.591367 6.335000         21
+metrics_adaptive_2.csv  1.381483 5.613333         16
+metrics_adaptive_3.csv  1.540717 5.371667         16
+metrics_adaptive_4.csv  1.448748 5.252087         15
+metrics_adaptive_5.csv  1.581400 5.770000         18
+
+SUMMARY (mean +/- std over seeds)
+Fixed:
+  avg wait: 2.73 +/- 0.12 s
+  queue:    6.70 +/- 0.50 veh
+  max queue: 20.60 veh
+Adaptive:
+  avg wait: 1.51 +/- 0.09 s
+  queue:    5.67 +/- 0.42 veh
+  max queue: 17.20 veh
