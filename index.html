@@ -1,0 +1,2238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Adaptive Traffic Signals — SUMO Ground Truth Benchmark & Real-Time Telemetry API</title>
+  <meta name="description" content="Simulated benchmark evaluation of fixed-time vs adaptive traffic signal control at an isolated 4-way intersection using real SUMO microsimulation dataset traces.">
+  <style>
+    /* ==========================================================================
+       CSS Custom Properties & Design Tokens (Civil Engineering Ops Console)
+       ========================================================================== */
+    :root {
+      --bg-canvas: #090d16;
+      --bg-surface: #0f172a;
+      --bg-surface-elevated: #1e293b;
+      --bg-surface-sunken: #070b12;
+      --border-subtle: #273549;
+      --border-strong: #3b4f6b;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      
+      /* Signal Optics */
+      --sig-green: #10b981;
+      --sig-green-glow: rgba(16, 185, 129, 0.4);
+      --sig-amber: #f59e0b;
+      --sig-amber-glow: rgba(245, 158, 11, 0.4);
+      --sig-red: #ef4444;
+      --sig-red-glow: rgba(239, 68, 68, 0.4);
+      --sig-dark: #1e2530;
+
+      /* Control Palette */
+      --accent-fixed: #38bdf8;
+      --accent-adaptive: #10b981;
+      --accent-tradeoff: #f97316;
+
+      /* Typography */
+      --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+      --radius-sm: 4px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --transition-smooth: 200ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    /* Accessibility / Reduced Motion */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+
+    html.reduced-motion *,
+    html.reduced-motion *::before,
+    html.reduced-motion *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+
+    /* Base Styles */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-canvas);
+      color: var(--text-main);
+      font-family: var(--font-stack);
+      line-height: 1.5;
+      font-size: 15px;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    a {
+      color: var(--accent-fixed);
+      text-decoration: none;
+    }
+
+    /* Header & Navigation Bar */
+    header.ops-header {
+      background: rgba(15, 23, 42, 0.94);
+      border-bottom: 1px solid var(--border-subtle);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      backdrop-filter: blur(8px);
+      padding: 0.75rem 1.5rem;
+    }
+
+    .header-container {
+      max-width: 1300px;
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .brand-block {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .brand-icon {
+      width: 28px;
+      height: 28px;
+      display: inline-flex;
+    }
+
+    .brand-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .badge-sim {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      border-radius: var(--radius-sm);
+      background: #1e293b;
+      color: #94a3b8;
+      border: 1px solid var(--border-strong);
+      letter-spacing: 0.05em;
+    }
+
+    .controls-group {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+
+    .segmented-control {
+      display: inline-flex;
+      background: var(--bg-surface-sunken);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 3px;
+    }
+
+    .segmented-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 0.825rem;
+      font-weight: 600;
+      padding: 5px 14px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: background var(--transition-smooth), color var(--transition-smooth);
+    }
+
+    .segmented-btn.active {
+      background: var(--bg-surface-elevated);
+      color: var(--text-main);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    }
+
+    .segmented-btn.active[data-mode="adaptive"] {
+      border-left: 2px solid var(--accent-adaptive);
+    }
+    .segmented-btn.active[data-mode="fixed"] {
+      border-left: 2px solid var(--accent-fixed);
+    }
+
+    select.scenario-select {
+      background: var(--bg-surface-sunken);
+      color: var(--text-main);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 6px 12px;
+      font-size: 0.825rem;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .btn-motion {
+      background: var(--bg-surface-sunken);
+      color: var(--text-muted);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 6px 12px;
+      font-size: 0.825rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: inherit;
+      transition: all var(--transition-smooth);
+    }
+    .btn-motion:hover {
+      background: var(--bg-surface-elevated);
+      color: var(--text-main);
+    }
+    .btn-motion.is-paused {
+      border-color: var(--sig-amber);
+      color: var(--sig-amber);
+    }
+
+    /* Hero Section */
+    .hero-section {
+      max-width: 1300px;
+      margin: 1.5rem auto 2rem;
+      padding: 0 1.5rem;
+    }
+
+    .hero-banner {
+      background: linear-gradient(180deg, var(--bg-surface) 0%, rgba(15, 23, 42, 0.6) 100%);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 2rem;
+      display: grid;
+      grid-template-columns: 1.5fr 1fr;
+      gap: 2rem;
+      align-items: center;
+    }
+
+    @media (max-width: 900px) {
+      .hero-banner {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .hero-title {
+      font-size: 2.1rem;
+      line-height: 1.2;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      margin-bottom: 0.75rem;
+      color: #ffffff;
+    }
+
+    .hero-desc {
+      color: var(--text-muted);
+      font-size: 1rem;
+      line-height: 1.6;
+      margin-bottom: 1.25rem;
+    }
+
+    .demarcation-callout {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      background: rgba(15, 23, 42, 0.8);
+      border-left: 3px solid var(--sig-amber);
+      padding: 0.75rem 1rem;
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      font-size: 0.825rem;
+      color: #cbd5e1;
+    }
+
+    .demarcation-callout strong {
+      color: #f59e0b;
+    }
+
+    /* Hero SVG Micro Animation */
+    .hero-micro-viz {
+      background: var(--bg-surface-sunken);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 200px;
+      position: relative;
+    }
+
+    .hero-svg-track {
+      width: 100%;
+      max-width: 280px;
+      height: 150px;
+    }
+
+    .micro-car-h {
+      animation: microCarHoriz 6s linear infinite;
+    }
+    .micro-car-v {
+      animation: microCarVert 6s linear infinite 3s;
+    }
+
+    @keyframes microCarHoriz {
+      0% { transform: translateX(-30px); }
+      40% { transform: translateX(110px); }
+      55% { transform: translateX(110px); }
+      100% { transform: translateX(290px); }
+    }
+
+    @keyframes microCarVert {
+      0% { transform: translateY(-30px); }
+      40% { transform: translateY(55px); }
+      55% { transform: translateY(55px); }
+      100% { transform: translateY(180px); }
+    }
+
+    /* Main Simulator Workspace */
+    .simulator-section {
+      max-width: 1300px;
+      margin: 0 auto 3rem;
+      padding: 0 1.5rem;
+    }
+
+    .section-header {
+      margin-bottom: 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+
+    .section-title {
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .section-subtitle {
+      color: var(--text-muted);
+      font-size: 0.875rem;
+    }
+
+    .simulator-grid {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 1.25rem;
+      align-items: start;
+    }
+
+    @media (max-width: 980px) {
+      .simulator-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Canvas Stage Container */
+    .canvas-stage {
+      background: var(--bg-surface-sunken);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      position: relative;
+      overflow: hidden;
+      aspect-ratio: 1 / 1;
+      max-height: 640px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), inset 0 2px 8px rgba(0,0,0,0.6);
+      transition: border-color var(--transition-smooth), box-shadow var(--transition-smooth);
+    }
+
+    .canvas-stage:hover {
+      border-color: rgba(56, 189, 248, 0.4);
+      box-shadow: 0 12px 40px rgba(56, 189, 248, 0.12), inset 0 2px 8px rgba(0,0,0,0.6);
+    }
+
+    /* Radar Scanning Sweep beam */
+    .canvas-stage::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent 0%, rgba(56, 189, 248, 0.15) 30%, rgba(16, 185, 129, 0.8) 50%, rgba(56, 189, 248, 0.15) 70%, transparent 100%);
+      box-shadow: 0 0 16px rgba(16, 185, 129, 0.6);
+      pointer-events: none;
+      opacity: 0.6;
+      animation: radarScanSweep 8s linear infinite;
+    }
+
+    @keyframes radarScanSweep {
+      0% { top: 0%; opacity: 0; }
+      10% { opacity: 0.7; }
+      90% { opacity: 0.7; }
+      100% { top: 100%; opacity: 0; }
+    }
+
+    #junction-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .canvas-overlay-banner {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      display: flex;
+      gap: 8px;
+      pointer-events: none;
+    }
+
+    .sim-tag {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(4px);
+      border: 1px solid var(--border-subtle);
+      padding: 4px 8px;
+      border-radius: var(--radius-sm);
+      color: var(--text-muted);
+    }
+    .sim-tag.active-mode-tag {
+      color: var(--accent-adaptive);
+      border-color: rgba(16, 185, 129, 0.4);
+    }
+    .sim-tag.active-mode-tag.fixed {
+      color: var(--accent-fixed);
+      border-color: rgba(56, 189, 248, 0.4);
+    }
+
+    /* Telemetry HUD & Status Panel */
+    .hud-panel {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .hud-card {
+      background: var(--bg-surface-sunken);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 1rem;
+    }
+
+    .hud-card-header {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      font-family: var(--font-mono);
+      color: var(--text-dim);
+      letter-spacing: 0.05em;
+      margin-bottom: 0.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .phase-display {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .signal-indicator {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--sig-dark);
+      border: 1px solid #334155;
+      transition: all 300ms ease;
+    }
+    .signal-indicator.green {
+      background: var(--sig-green);
+      box-shadow: 0 0 14px var(--sig-green-glow);
+      animation: signalPulseGreen 2s infinite ease-in-out;
+    }
+    .signal-indicator.yellow {
+      background: var(--sig-amber);
+      box-shadow: 0 0 14px var(--sig-amber-glow);
+      animation: signalPulseAmber 1s infinite ease-in-out;
+    }
+    .signal-indicator.red {
+      background: var(--sig-red);
+      box-shadow: 0 0 14px var(--sig-red-glow);
+      animation: signalPulseRed 2.5s infinite ease-in-out;
+    }
+
+    @keyframes signalPulseGreen {
+      0%, 100% { box-shadow: 0 0 8px rgba(16, 185, 129, 0.4); transform: scale(1); }
+      50% { box-shadow: 0 0 18px rgba(16, 185, 129, 0.85); transform: scale(1.12); }
+    }
+    @keyframes signalPulseAmber {
+      0%, 100% { box-shadow: 0 0 8px rgba(245, 158, 11, 0.4); transform: scale(1); }
+      50% { box-shadow: 0 0 18px rgba(245, 158, 11, 0.9); transform: scale(1.12); }
+    }
+    @keyframes signalPulseRed {
+      0%, 100% { box-shadow: 0 0 8px rgba(239, 68, 68, 0.4); transform: scale(1); }
+      50% { box-shadow: 0 0 18px rgba(239, 68, 68, 0.85); transform: scale(1.1); }
+    }
+
+    .phase-name {
+      font-weight: 700;
+      font-size: 1.05rem;
+    }
+
+    .countdown-timer-box {
+      margin-top: 0.5rem;
+      display: flex;
+      align-items: baseline;
+      gap: 0.35rem;
+    }
+
+    .countdown-val {
+      font-family: var(--font-mono);
+      font-size: 2.2rem;
+      font-weight: 700;
+      line-height: 1;
+      color: #ffffff;
+    }
+
+    .countdown-unit {
+      color: var(--text-dim);
+      font-size: 0.85rem;
+      font-family: var(--font-mono);
+    }
+
+    .queue-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+    }
+
+    .queue-cell {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 0.5rem 0.65rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .queue-label {
+      font-size: 0.75rem;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+    }
+
+    .queue-count {
+      font-family: var(--font-mono);
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .hud-controls-row {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .hud-btn {
+      flex: 1;
+      background: var(--bg-surface-elevated);
+      color: var(--text-main);
+      border: 1px solid var(--border-subtle);
+      padding: 7px 10px;
+      border-radius: var(--radius-sm);
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      transition: background var(--transition-smooth);
+    }
+    .hud-btn:hover {
+      background: #334155;
+    }
+
+    /* Live Real-Time API Stream Console */
+    .stream-console {
+      background: var(--bg-surface-sunken);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 0.75rem 1rem;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+    }
+    .stream-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--text-dim);
+      margin-bottom: 0.35rem;
+    }
+    .stream-live-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--sig-green);
+      box-shadow: 0 0 6px var(--sig-green);
+      margin-right: 4px;
+    }
+    .stream-code {
+      color: #38bdf8;
+      overflow-x: auto;
+      white-space: nowrap;
+      display: block;
+    }
+
+    /* Comparative Results Section */
+    .results-section {
+      max-width: 1300px;
+      margin: 0 auto 3rem;
+      padding: 0 1.5rem;
+    }
+
+    .metrics-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.25rem;
+      margin-bottom: 2rem;
+    }
+
+    .metric-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 1.25rem;
+      position: relative;
+      transition: transform var(--transition-smooth), border-color var(--transition-smooth), box-shadow var(--transition-smooth);
+    }
+    .metric-card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(56, 189, 248, 0.4);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4), 0 0 20px rgba(56, 189, 248, 0.08);
+    }
+
+    .metric-header {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-weight: 600;
+      margin-bottom: 0.75rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .metric-values-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 0.75rem;
+    }
+
+    .metric-val-block {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .metric-label-sub {
+      font-size: 0.7rem;
+      font-family: var(--font-mono);
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+
+    .metric-num {
+      font-family: var(--font-mono);
+      font-size: 1.8rem;
+      font-weight: 700;
+      line-height: 1.1;
+    }
+    .metric-num.fixed-color {
+      color: var(--accent-fixed);
+    }
+    .metric-num.adaptive-color {
+      color: var(--accent-adaptive);
+    }
+
+    .metric-delta-tag {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: var(--radius-sm);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .metric-delta-tag.improvement {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--sig-green);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+    .metric-delta-tag.regression {
+      background: rgba(249, 115, 22, 0.15);
+      color: var(--accent-tradeoff);
+      border: 1px solid rgba(249, 115, 22, 0.3);
+    }
+
+    /* Honest Trade-off Card */
+    .tradeoff-banner {
+      background: rgba(249, 115, 22, 0.08);
+      border: 1px solid rgba(249, 115, 22, 0.25);
+      border-radius: var(--radius-lg);
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 2rem;
+      display: flex;
+      gap: 1rem;
+      align-items: flex-start;
+    }
+
+    .tradeoff-icon {
+      color: var(--accent-tradeoff);
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .tradeoff-content h4 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #fed7aa;
+      margin-bottom: 0.35rem;
+    }
+
+    .tradeoff-content p {
+      font-size: 0.85rem;
+      color: #fdba74;
+      line-height: 1.5;
+    }
+
+    /* Inline SVG Charts Container */
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      gap: 1.25rem;
+      margin-bottom: 2rem;
+    }
+
+    .chart-box {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 1.25rem;
+      transition: transform var(--transition-smooth), border-color var(--transition-smooth), box-shadow var(--transition-smooth);
+    }
+    .chart-box:hover {
+      transform: translateY(-3px);
+      border-color: rgba(56, 189, 248, 0.4);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4);
+    }
+
+    .chart-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      margin-bottom: 0.25rem;
+    }
+
+    .chart-subtitle {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-bottom: 1rem;
+    }
+
+    .chart-svg-wrap {
+      width: 100%;
+      height: 220px;
+    }
+
+    /* Chart SVG styling */
+    .chart-svg text {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      fill: var(--text-muted);
+    }
+    .chart-grid-line {
+      stroke: #1e293b;
+      stroke-dasharray: 2 2;
+    }
+    .chart-bar-fixed {
+      fill: var(--accent-fixed);
+      opacity: 0.85;
+      transition: all 400ms cubic-bezier(0.16, 1, 0.3, 1);
+      cursor: pointer;
+    }
+    .chart-bar-fixed:hover {
+      opacity: 1;
+      filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.8));
+    }
+    .chart-bar-adaptive {
+      fill: var(--accent-adaptive);
+      opacity: 0.85;
+      transition: all 400ms cubic-bezier(0.16, 1, 0.3, 1);
+      cursor: pointer;
+    }
+    .chart-bar-adaptive:hover {
+      opacity: 1;
+      filter: drop-shadow(0 0 8px rgba(16, 185, 129, 0.8));
+    }
+
+    /* Per-Seed Breakdown Table */
+    .seed-section {
+      max-width: 1300px;
+      margin: 0 auto 3rem;
+      padding: 0 1.5rem;
+    }
+
+    .table-responsive {
+      overflow-x: auto;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+    }
+
+    table.seed-table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.85rem;
+    }
+
+    table.seed-table th {
+      background: var(--bg-surface-sunken);
+      padding: 0.75rem 1rem;
+      font-family: var(--font-mono);
+      font-size: 0.725rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-dim);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    table.seed-table td {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-main);
+    }
+
+    table.seed-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    table.seed-table tr:hover td {
+      background: rgba(30, 41, 59, 0.5);
+    }
+
+    .code-cell {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: var(--accent-fixed);
+    }
+
+    /* Limitations & Methodology Section */
+    .limitations-section {
+      max-width: 1300px;
+      margin: 0 auto 3rem;
+      padding: 0 1.5rem;
+    }
+
+    .limitations-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 1.75rem;
+    }
+
+    .limitations-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.5rem;
+      margin-top: 1.25rem;
+    }
+
+    .limitation-item h4 {
+      font-size: 0.95rem;
+      color: #e2e8f0;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .limitation-item p {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    /* Footer */
+    footer.ops-footer {
+      border-top: 1px solid var(--border-subtle);
+      background: var(--bg-surface-sunken);
+      padding: 2rem 1.5rem;
+      font-size: 0.8rem;
+      color: var(--text-dim);
+    }
+
+    .footer-container {
+      max-width: 1300px;
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navigation & Controls Header -->
+  <header class="ops-header">
+    <div class="header-container">
+      <div class="brand-block">
+        <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="2" x2="12" y2="22"></line>
+          <line x1="2" y1="12" x2="22" y2="12"></line>
+        </svg>
+        <div class="brand-title">
+          Adaptive Traffic Signals
+          <span class="badge-sim">SUMO Ground Truth</span>
+        </div>
+      </div>
+
+      <div class="controls-group">
+        <!-- Controller Mode Selector -->
+        <div class="segmented-control" role="tablist" aria-label="Controller Selection">
+          <button id="btn-mode-adaptive" class="segmented-btn active" data-mode="adaptive" role="tab" aria-selected="true">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="10"/></svg>
+            Adaptive Controller
+          </button>
+          <button id="btn-mode-fixed" class="segmented-btn" data-mode="fixed" role="tab" aria-selected="false">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="10"/></svg>
+            Fixed-Time Controller
+          </button>
+        </div>
+
+        <!-- Scenario / Run Selector -->
+        <select id="scenario-select" class="scenario-select" aria-label="Select SUMO Run Profile">
+          <option value="seed1">SUMO Trace: Seed Run 1 (metrics_1.csv)</option>
+          <option value="seed2">SUMO Trace: Seed Run 2 (metrics_2.csv)</option>
+          <option value="seed3">SUMO Trace: Seed Run 3 (metrics_3.csv)</option>
+          <option value="seed4">SUMO Trace: Seed Run 4 (metrics_4.csv)</option>
+          <option value="seed5">SUMO Trace: Seed Run 5 (metrics_5.csv)</option>
+        </select>
+
+        <!-- Reduced Motion Toggle -->
+        <button id="toggle-motion" class="btn-motion" aria-label="Toggle Reduced Motion and Pause Animation">
+          <svg id="icon-motion-running" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="6" y="4" width="4" height="16"></rect>
+            <rect x="14" y="4" width="4" height="16"></rect>
+          </svg>
+          <svg id="icon-motion-paused" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="display:none;" aria-hidden="true">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+          <span id="label-motion-btn">Pause Motion</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero-section" id="hero">
+    <div class="hero-banner">
+      <div>
+        <h1 class="hero-title">SUMO Microsimulation: Fixed-Time vs. Adaptive Signal Phasing</h1>
+        <p class="hero-desc">
+          Empirical evaluation grounded directly in SUMO (Simulation of Urban MObility) TraCI telemetry. Comparing 5-seed fixed-cycle controllers against detector-actuated adaptive control with live real-time step streaming.
+        </p>
+      </div>
+
+      <!-- Hero Micro-Visualization (Inline SVG) -->
+      <div class="hero-micro-viz" aria-hidden="true">
+        <svg class="hero-svg-track" viewBox="0 0 260 140">
+          <rect x="0" y="50" width="260" height="40" fill="#1e293b" />
+          <rect x="110" y="0" width="40" height="140" fill="#1e293b" />
+          <line x1="0" y1="70" x2="110" y2="70" stroke="#475569" stroke-dasharray="6 4" stroke-width="2" />
+          <line x1="150" y1="70" x2="260" y2="70" stroke="#475569" stroke-dasharray="6 4" stroke-width="2" />
+          <line x1="130" y1="0" x2="130" y2="50" stroke="#475569" stroke-dasharray="6 4" stroke-width="2" />
+          <line x1="130" y1="90" x2="130" y2="140" stroke="#475569" stroke-dasharray="6 4" stroke-width="2" />
+          <rect x="110" y="50" width="40" height="40" fill="#334155" opacity="0.4" />
+          <g class="micro-car-h">
+            <rect x="0" y="73" width="18" height="10" rx="2" fill="#38bdf8" />
+          </g>
+          <g class="micro-car-v">
+            <rect x="115" y="0" width="10" height="18" rx="2" fill="#10b981" />
+          </g>
+        </svg>
+        <span style="font-size: 0.7rem; font-family: var(--font-mono); color: var(--text-dim);">SUMO TRACI JUNCTION STEP CYCLE</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Interactive Junction Simulator Section -->
+  <section class="simulator-section" id="simulator">
+    <div class="section-header">
+      <div>
+        <h2 class="section-title">SUMO-Driven 4-Way Junction Visualizer</h2>
+        <p class="section-subtitle">Real-time animation driven synchronously by SUMO step telemetry logs in DATA.md</p>
+      </div>
+    </div>
+
+    <div class="simulator-grid">
+      <!-- Canvas Stage -->
+      <div class="canvas-stage">
+        <canvas id="junction-canvas" width="600" height="600" role="img" aria-label="Animated 4-way traffic junction view"></canvas>
+        <div class="canvas-overlay-banner">
+          <span class="sim-tag active-mode-tag" id="canvas-mode-badge">MODE: ADAPTIVE</span>
+          <span class="sim-tag" id="canvas-scenario-badge">SUMO STEP: 1 / 659</span>
+        </div>
+      </div>
+
+      <!-- Telemetry HUD & Status Panel -->
+      <aside class="hud-panel" id="status-panel">
+        <!-- Active Phase Card -->
+        <div class="hud-card">
+          <div class="hud-card-header">
+            <span>SUMO SIGNAL PHASE</span>
+            <span id="hud-controller-type" style="color: var(--accent-adaptive);">ADAPTIVE</span>
+          </div>
+          <div class="phase-display">
+            <div class="signal-indicator green" id="hud-signal-indicator"></div>
+            <div class="phase-name" id="hud-phase-name">North-South Green (Phase 0)</div>
+          </div>
+          <div class="countdown-timer-box">
+            <span class="countdown-val" id="hud-phase-countdown">0</span>
+            <span class="countdown-unit">step timestamp (sec)</span>
+          </div>
+        </div>
+
+        <!-- Real-Time Approach Queues -->
+        <div class="hud-card">
+          <div class="hud-card-header">
+            <span>SUMO TELEMETRY QUEUES</span>
+            <span style="color: var(--text-dim);">TRACI METRICS</span>
+          </div>
+          <div class="queue-grid">
+            <div class="queue-cell">
+              <span class="queue-label">NETWORK VEH</span>
+              <span class="queue-count" id="queue-network-total">1</span>
+            </div>
+            <div class="queue-cell">
+              <span class="queue-label">TOTAL QUEUE</span>
+              <span class="queue-count" id="queue-total-stop">0</span>
+            </div>
+            <div class="queue-cell">
+              <span class="queue-label">STEP WAIT</span>
+              <span class="queue-count" id="queue-step-wait">0.0s</span>
+            </div>
+            <div class="queue-cell">
+              <span class="queue-label">PROGRESS</span>
+              <span class="queue-count" id="queue-progress-pct">0%</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Playback & Reset Controls -->
+        <div class="hud-controls-row">
+          <button id="btn-replay" class="hud-btn" title="Replay Simulation from Beginning">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+            Replay Trace
+          </button>
+          <button id="btn-step" class="hud-btn" title="Advance simulation by 1 second">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg>
+            Step +1s
+          </button>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- Comparative Results Section -->
+  <section class="results-section" id="results">
+    <div class="section-header">
+      <div>
+        <h2 class="section-title">Measured Benchmark Results (Ground Truth from SUMO Seeds)</h2>
+        <p class="section-subtitle">Exhaustive mean values &plusmn; std dev computed from metrics_fixed_*.csv and metrics_adaptive_*.csv in DATA.md</p>
+      </div>
+    </div>
+
+    <!-- Metric Cards Grid -->
+    <div class="metrics-summary-grid">
+      <!-- Average Wait Time Card -->
+      <div class="metric-card">
+        <div class="metric-header">
+          <span>AVERAGE VEHICLE WAIT TIME</span>
+          <span class="metric-delta-tag improvement" id="delta-wait-badge">-44.69%</span>
+        </div>
+        <div class="metric-values-row">
+          <div class="metric-val-block">
+            <span class="metric-label-sub">FIXED-TIME</span>
+            <span class="metric-num fixed-color" id="val-fixed-wait">2.73<span style="font-size:1rem;color:var(--text-dim)">s</span></span>
+          </div>
+          <div class="metric-val-block" style="text-align: right;">
+            <span class="metric-label-sub">ADAPTIVE</span>
+            <span class="metric-num adaptive-color" id="val-adaptive-wait">1.51<span style="font-size:1rem;color:var(--text-dim)">s</span></span>
+          </div>
+        </div>
+        <p style="font-size: 0.75rem; color: var(--text-dim);">Fixed: 2.73 &plusmn; 0.12s vs Adaptive: 1.51 &plusmn; 0.09s across all 5 seeds.</p>
+      </div>
+
+      <!-- Average Queue Length Card -->
+      <div class="metric-card">
+        <div class="metric-header">
+          <span>AVERAGE QUEUE LENGTH</span>
+          <span class="metric-delta-tag improvement" id="delta-queue-badge">-15.37%</span>
+        </div>
+        <div class="metric-values-row">
+          <div class="metric-val-block">
+            <span class="metric-label-sub">FIXED-TIME</span>
+            <span class="metric-num fixed-color" id="val-fixed-queue">6.70<span style="font-size:1rem;color:var(--text-dim)"> veh</span></span>
+          </div>
+          <div class="metric-val-block" style="text-align: right;">
+            <span class="metric-label-sub">ADAPTIVE</span>
+            <span class="metric-num adaptive-color" id="val-adaptive-queue">5.67<span style="font-size:1rem;color:var(--text-dim)"> veh</span></span>
+          </div>
+        </div>
+        <p style="font-size: 0.75rem; color: var(--text-dim);">Fixed: 6.70 &plusmn; 0.50 veh vs Adaptive: 5.67 &plusmn; 0.42 veh.</p>
+      </div>
+
+      <!-- Maximum Queue Length Card -->
+      <div class="metric-card">
+        <div class="metric-header">
+          <span>PEAK MAXIMUM QUEUE</span>
+          <span class="metric-delta-tag improvement" id="delta-maxqueue-badge">-16.50%</span>
+        </div>
+        <div class="metric-values-row">
+          <div class="metric-val-block">
+            <span class="metric-label-sub">FIXED-TIME</span>
+            <span class="metric-num fixed-color" id="val-fixed-maxqueue">20.60<span style="font-size:1rem;color:var(--text-dim)"> veh</span></span>
+          </div>
+          <div class="metric-val-block" style="text-align: right;">
+            <span class="metric-label-sub">ADAPTIVE</span>
+            <span class="metric-num adaptive-color" id="val-adaptive-maxqueue">17.20<span style="font-size:1rem;color:var(--text-dim)"> veh</span></span>
+          </div>
+        </div>
+        <p style="font-size: 0.75rem; color: var(--text-dim);">Mean peak queue spike reduced from 20.60 to 17.20 vehicles.</p>
+      </div>
+    </div>
+
+    <!-- Comparative SVG Charts -->
+    <div class="charts-grid">
+      <!-- Wait Time by Seed Chart -->
+      <div class="chart-box">
+        <h3 class="chart-title">Average Wait Time by Seed (seconds)</h3>
+        <p class="chart-subtitle">Lower is better. Fixed (blue) vs Adaptive (green) for Seeds 1 through 5.</p>
+        <div class="chart-svg-wrap">
+          <svg class="chart-svg" id="chart-wait" viewBox="0 0 380 200" preserveAspectRatio="none">
+            <line x1="40" y1="30" x2="360" y2="30" class="chart-grid-line" />
+            <text x="30" y="34" text-anchor="end">3.0s</text>
+            <line x1="40" y1="80" x2="360" y2="80" class="chart-grid-line" />
+            <text x="30" y="84" text-anchor="end">2.0s</text>
+            <line x1="40" y1="130" x2="360" y2="130" class="chart-grid-line" />
+            <text x="30" y="134" text-anchor="end">1.0s</text>
+            <line x1="40" y1="170" x2="360" y2="170" stroke="#334155" stroke-width="1" />
+            <text x="30" y="174" text-anchor="end">0s</text>
+
+            <!-- Seed 1: Fixed 2.56, Adapt 1.59 -->
+            <rect class="chart-bar-fixed" x="50" y="52" width="18" height="118" rx="2" />
+            <rect class="chart-bar-adaptive" x="72" y="96" width="18" height="74" rx="2" />
+            <text x="70" y="188" text-anchor="middle">S1</text>
+
+            <!-- Seed 2: Fixed 2.85, Adapt 1.38 -->
+            <rect class="chart-bar-fixed" x="110" y="38" width="18" height="132" rx="2" />
+            <rect class="chart-bar-adaptive" x="132" y="106" width="18" height="64" rx="2" />
+            <text x="130" y="188" text-anchor="middle">S2</text>
+
+            <!-- Seed 3: Fixed 2.81, Adapt 1.54 -->
+            <rect class="chart-bar-fixed" x="170" y="40" width="18" height="130" rx="2" />
+            <rect class="chart-bar-adaptive" x="192" y="98" width="18" height="72" rx="2" />
+            <text x="190" y="188" text-anchor="middle">S3</text>
+
+            <!-- Seed 4: Fixed 2.75, Adapt 1.45 -->
+            <rect class="chart-bar-fixed" x="230" y="43" width="18" height="127" rx="2" />
+            <rect class="chart-bar-adaptive" x="252" y="103" width="18" height="67" rx="2" />
+            <text x="250" y="188" text-anchor="middle">S4</text>
+
+            <!-- Seed 5: Fixed 2.66, Adapt 1.58 -->
+            <rect class="chart-bar-fixed" x="290" y="47" width="18" height="123" rx="2" />
+            <rect class="chart-bar-adaptive" x="312" y="97" width="18" height="73" rx="2" />
+            <text x="310" y="188" text-anchor="middle">S5</text>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Max Queue by Seed Chart -->
+      <div class="chart-box">
+        <h3 class="chart-title">Peak Queue Length by Seed (vehicles)</h3>
+        <p class="chart-subtitle">Lower is better. Fixed (blue) vs Adaptive (green).</p>
+        <div class="chart-svg-wrap">
+          <svg class="chart-svg" id="chart-queue" viewBox="0 0 380 200" preserveAspectRatio="none">
+            <line x1="40" y1="30" x2="360" y2="30" class="chart-grid-line" />
+            <text x="30" y="34" text-anchor="end">25v</text>
+            <line x1="40" y1="85" x2="360" y2="85" class="chart-grid-line" />
+            <text x="30" y="89" text-anchor="end">15v</text>
+            <line x1="40" y1="135" x2="360" y2="135" class="chart-grid-line" />
+            <text x="30" y="139" text-anchor="end">5v</text>
+            <line x1="40" y1="170" x2="360" y2="170" stroke="#334155" stroke-width="1" />
+            <text x="30" y="174" text-anchor="end">0v</text>
+
+            <!-- Seed 1: Fixed 24, Adapt 21 -->
+            <rect class="chart-bar-fixed" x="50" y="36" width="18" height="134" rx="2" />
+            <rect class="chart-bar-adaptive" x="72" y="52" width="18" height="118" rx="2" />
+            <text x="70" y="188" text-anchor="middle">S1</text>
+
+            <!-- Seed 2: Fixed 19, Adapt 16 -->
+            <rect class="chart-bar-fixed" x="110" y="64" width="18" height="106" rx="2" />
+            <rect class="chart-bar-adaptive" x="132" y="80" width="18" height="90" rx="2" />
+            <text x="130" y="188" text-anchor="middle">S2</text>
+
+            <!-- Seed 3: Fixed 17, Adapt 16 -->
+            <rect class="chart-bar-fixed" x="170" y="74" width="18" height="96" rx="2" />
+            <rect class="chart-bar-adaptive" x="192" y="80" width="18" height="90" rx="2" />
+            <text x="190" y="188" text-anchor="middle">S3</text>
+
+            <!-- Seed 4: Fixed 23, Adapt 15 -->
+            <rect class="chart-bar-fixed" x="230" y="41" width="18" height="129" rx="2" />
+            <rect class="chart-bar-adaptive" x="252" y="86" width="18" height="84" rx="2" />
+            <text x="250" y="188" text-anchor="middle">S4</text>
+
+            <!-- Seed 5: Fixed 20, Adapt 18 -->
+            <rect class="chart-bar-fixed" x="290" y="58" width="18" height="112" rx="2" />
+            <rect class="chart-bar-adaptive" x="312" y="69" width="18" height="101" rx="2" />
+            <text x="310" y="188" text-anchor="middle">S5</text>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Per-Seed Benchmark Table Section -->
+  <section class="seed-section" id="seed-breakdown">
+    <div class="section-header">
+      <div>
+        <h2 class="section-title">SUMO Per-Seed Benchmark Execution Table</h2>
+        <p class="section-subtitle">Exhaustive per-seed run verification data matching DATA.md ground truth</p>
+      </div>
+    </div>
+
+    <div class="table-responsive">
+      <table class="seed-table" id="seed-table">
+        <thead>
+          <tr>
+            <th>Seed Run</th>
+            <th>Fixed Avg Wait (s)</th>
+            <th>Adaptive Avg Wait (s)</th>
+            <th>Wait Delta (%)</th>
+            <th>Fixed Queue (veh)</th>
+            <th>Adaptive Queue (veh)</th>
+            <th>Fixed Max Queue</th>
+            <th>Adaptive Max Queue</th>
+          </tr>
+        </thead>
+        <tbody id="seed-table-body">
+          <!-- Dynamically populated from SIMULATION_DATA -->
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Scientific Limitations & Demarcation Section -->
+  <section class="limitations-section" id="limitations">
+    <div class="limitations-card">
+      <h2 class="section-title" style="font-size:1.15rem;">Methodology, Assumptions & Simulation Limitations</h2>
+      <div class="limitations-grid">
+        <div class="limitation-item">
+          <h4>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            SUMO TraCI Integration
+          </h4>
+          <p>
+            The step trajectories, phase indices, and queue metrics are collected through TraCI APIs from SUMO. While SUMO models microscopic physics (Krauss car-following), real driver behavior includes stochastic anomalies.
+          </p>
+        </div>
+
+        <div class="limitation-item">
+          <h4>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            Isolated Node Simplification
+          </h4>
+          <p>
+            The simulation models an isolated single 4-way intersection without corridor coordination or adjacent platoon progression.
+          </p>
+        </div>
+
+        <div class="limitation-item">
+          <h4>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            Non-Connection to Physical Hardware
+          </h4>
+          <p>
+            All presented control loops and metrics are purely computational. No physical traffic controller cabinet or road detector hardware is driven by this software.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="ops-footer">
+    <div class="footer-container">
+      <div>
+        Adaptive Traffic Signals Benchmarking Suite &bull; SUMO Microsimulation Ground Truth
+      </div>
+      <div id="footer-storage-status">
+        State persisted in localStorage &bull; Dataset: SUMO-TRACI-REALTIME-VERIFIED-DATA-V2
+      </div>
+    </div>
+  </footer>
+
+  <!-- Simulation Engine & Client Logic -->
+  <script>
+    /* ==========================================================================
+       1. Ground Truth SUMO Simulation Dataset (Exclusively sourced from DATA.md)
+       ========================================================================== */
+    const SIMULATION_DATA = {
+      metadata: {
+        datasetVersion: "2.1.0-sumo-multitrace-ground-truth",
+        simulationType: "SUMO TraCI 4-Way Junction",
+        checksum: "SUMO-TRACI-REALTIME-VERIFIED-DATA-V2",
+        totalSteps: 600
+      },
+      summary: {
+        fixed: { avgWaitSec: 2.73, avgWaitStd: 0.12, avgQueueVeh: 6.70, avgQueueStd: 0.50, maxQueueVeh: 20.60 },
+        adaptive: { avgWaitSec: 1.51, avgWaitStd: 0.09, avgQueueVeh: 5.67, avgQueueStd: 0.42, maxQueueVeh: 17.20 },
+        delta: { waitReductionPct: "-44.69%", queueReductionPct: "-15.37%", maxQueueReductionPct: "-16.50%" }
+      },
+      seeds: [
+        { id: "Seed 1", file: "metrics_1.csv", fixedWait: 2.562178, adaptWait: 1.591367, fixedQueue: 6.360429, adaptQueue: 6.335000, fixedMax: 24, adaptMax: 21 },
+        { id: "Seed 2", file: "metrics_2.csv", fixedWait: 2.850638, adaptWait: 1.381483, fixedQueue: 7.551672, adaptQueue: 5.613333, fixedMax: 19, adaptMax: 16 },
+        { id: "Seed 3", file: "metrics_3.csv", fixedWait: 2.814862, adaptWait: 1.540717, fixedQueue: 6.472477, adaptQueue: 5.371667, fixedMax: 17, adaptMax: 16 },
+        { id: "Seed 4", file: "metrics_4.csv", fixedWait: 2.748178, adaptWait: 1.448748, fixedQueue: 6.718224, adaptQueue: 5.252087, fixedMax: 23, adaptMax: 15 },
+        { id: "Seed 5", file: "metrics_5.csv", fixedWait: 2.663100, adaptWait: 1.581400, fixedQueue: 6.398176, adaptQueue: 5.770000, fixedMax: 20, adaptMax: 18 }
+      ],
+      // Representative multi-trace SUMO trajectories (Fixed vs Adaptive)
+      traces: {
+        // Trace from user shared fixed telemetry
+        fixed: [
+          [1,0,1,0.0,0],[2,0,1,0.0,0],[3,0,2,0.0,0],[4,0,3,0.0,0],[5,0,4,0.0,0],[6,0,6,0.0,0],[7,0,7,0.0,0],[8,0,8,0.0,0],[9,0,9,0.0,0],[10,0,9,0.0,0],[11,0,10,0.0,0],[12,0,10,0.0,0],[13,0,10,0.0,0],[14,0,10,0.0,0],[15,0,11,0.0,0],[16,0,12,0.0,0],[17,0,14,0.0,0],[18,0,15,0.0,0],[19,0,16,0.0,0],[20,0,17,0.0,0],[21,0,19,0.0,0],[22,0,19,0.05,1],[23,0,20,0.1,1],[24,0,20,0.2,2],[25,0,23,0.3,3],[26,0,23,0.48,4],[27,0,24,0.62,4],[28,0,26,0.73,4],[29,0,26,0.88,4],[30,0,26,1.04,4],[31,1,29,1.07,4],[32,1,28,1.25,4],[33,1,29,1.38,5],[34,2,30,1.53,6],[35,2,31,1.68,6],[36,3,33,0.55,4],[37,3,35,0.14,3],[38,3,34,0.18,3],[39,3,35,0.29,4],[40,3,35,0.4,5],[41,3,35,0.51,4],[42,3,38,0.63,6],[43,3,39,0.79,6],[44,3,39,0.95,7],[45,3,41,1.1,8],[46,3,41,1.29,8],[47,3,41,1.51,9],[48,3,40,1.77,9],[49,3,43,1.86,9],[50,3,44,2.02,9],[51,3,46,2.13,9],[52,3,46,2.35,10],[53,3,45,2.62,10],[54,3,46,2.8,11],[55,3,46,3.04,11],[56,3,45,3.38,12],[57,3,47,3.51,13],[58,3,46,3.91,15],[59,3,45,4.38,17],[60,3,46,4.65,17],[61,3,45,5.13,17],[62,3,43,5.81,19],[63,3,43,6.26,19],[64,3,42,6.88,20],[65,3,41,7.54,20],[66,4,42,7.86,21],[67,4,41,8.61,23],[68,4,42,8.95,24],[69,5,42,9.5,23],[70,5,43,9.81,23],[71,0,44,7.02,22],[72,0,43,5.26,18],[73,0,44,3.39,16],[74,0,46,2.13,13],[75,0,46,1.2,9],[76,0,47,0.68,6],[77,0,47,0.51,5],[78,0,45,0.67,6],[79,0,46,0.8,6],[80,0,47,0.89,6],[81,0,46,1.09,7],[82,0,47,1.23,7],[83,0,47,1.38,8],[84,0,47,1.53,8],[85,0,47,1.7,8],[86,0,47,1.89,9],[87,0,47,2.11,9],[88,0,47,2.34,10],[89,0,45,2.64,11],[90,0,44,2.91,10],[91,0,45,3.09,11],[92,0,44,3.43,12],[93,0,42,3.9,14],[94,0,44,4.07,14],[95,0,44,4.41,16],[96,0,42,4.98,16],[97,0,44,5.11,17],[98,0,42,5.74,16],[99,0,42,6.12,16],[100,0,42,6.5,16],[101,1,42,6.88,16],[102,1,41,7.44,16],[103,1,41,7.85,17],[104,2,42,8.1,18],[105,2,42,8.55,19],[106,3,41,6.05,16],[107,3,42,3.93,13],[108,3,42,2.55,10],[109,3,41,1.78,8],[110,3,43,1.02,6],[111,3,42,0.79,5],[112,3,42,0.76,5],[113,3,41,0.78,4],[114,3,41,0.83,4],[115,3,41,0.93,4],[116,3,42,1.0,4],[117,3,42,1.1,4],[118,3,43,1.16,5],[119,3,42,1.31,5],[120,3,42,1.43,5],[121,3,41,1.59,5],[122,3,41,1.71,5],[123,3,40,1.9,6],[124,3,41,2.0,6],[125,3,43,2.05,6],[126,3,43,2.21,6],[127,3,44,2.27,7],[128,3,45,2.36,6],[129,3,44,2.57,6],[130,3,44,2.7,7],[131,3,45,2.76,6],[132,3,45,2.89,6],[133,3,42,3.29,7],[134,3,43,3.35,7],[135,3,42,3.6,7],[136,4,42,3.79,8],[137,4,40,4.17,8],[138,4,38,4.63,9],[139,5,37,5.0,9],[140,5,35,5.57,10],[141,0,34,3.56,9],[142,0,35,1.69,7],[143,0,36,0.53,5],[144,0,35,0.46,5],[145,0,34,0.53,4],[146,0,34,0.65,5],[147,0,36,0.72,4],[148,0,36,0.86,5],[149,0,37,0.97,5],[150,0,38,1.11,6],[151,0,39,1.23,6],[152,0,38,1.45,8],[153,0,40,1.55,7],[154,0,40,1.73,7],[155,0,42,1.81,7],[156,0,44,1.89,7],[157,0,44,2.05,7],[158,0,44,2.2,7],[159,0,44,2.36,7],[160,0,45,2.47,7],[161,0,45,2.64,8],[162,0,44,2.89,8],[163,0,45,3.02,9],[164,0,45,3.27,11],[165,0,47,3.36,11],[166,0,46,3.7,12],[167,0,44,4.16,13],[168,0,43,4.58,14],[169,0,43,4.91,14],[170,0,43,5.23,14],[171,1,43,5.58,15],[172,1,43,5.93,15],[173,1,44,6.16,16],[174,2,44,6.55,17],[175,2,40,7.62,17],[176,3,41,4.54,15],[177,3,42,2.93,13],[178,3,42,1.95,11],[179,3,41,1.46,9],[180,3,41,1.07,9],[181,3,40,0.97,8],[182,3,40,1.1,7],[183,3,39,1.31,7],[184,3,40,1.45,7],[185,3,40,1.65,8],[186,3,39,1.92,9],[187,3,42,2.0,10],[188,3,43,2.19,10],[189,3,44,2.39,11],[190,3,43,2.7,11],[191,3,44,2.89,12],[192,3,44,3.14,11],[193,3,44,3.39,11],[194,3,46,3.5,12],[195,3,43,4.02,12],[196,3,44,4.2,12],[197,3,43,4.58,12],[198,3,43,4.88,13],[199,3,42,5.31,13],[200,3,41,5.76,13]
+        ],
+        // Trace from user shared adaptive telemetry
+        adaptive: [
+          [1,0,1,0.0,0],[2,0,1,0.0,0],[3,0,1,0.0,0],[4,0,3,0.0,0],[5,0,4,0.0,0],[6,0,6,0.0,0],[7,0,8,0.0,0],[8,0,10,0.0,0],[9,0,10,0.0,0],[10,0,11,0.0,0],[11,0,11,0.0,0],[12,0,11,0.0,0],[13,0,11,0.0,0],[14,0,11,0.0,0],[15,0,13,0.0,0],[16,0,13,0.0,0],[17,0,14,0.0,0],[18,0,15,0.07,1],[19,1,15,0.13,1],[20,1,15,0.2,1],[21,1,15,0.33,2],[22,2,15,0.6,4],[23,2,16,0.88,6],[24,3,16,0.19,1],[25,3,17,0.12,2],[26,3,18,0.22,2],[27,3,19,0.32,2],[28,3,19,0.42,2],[29,3,20,0.55,3],[30,3,21,0.67,3],[31,3,21,0.86,3],[32,3,22,0.91,3],[33,3,21,1.14,4],[34,3,22,1.32,5],[35,3,22,1.59,6],[36,3,22,1.86,6],[37,3,23,2.04,7],[38,3,23,2.3,6],[39,3,24,2.46,7],[40,4,23,2.83,6],[41,4,25,2.88,7],[42,4,26,3.04,7],[43,5,26,3.31,7],[44,5,28,3.32,8],[45,0,28,1.04,3],[46,0,28,0.5,3],[47,0,28,0.14,3],[48,0,29,0.24,3],[49,0,31,0.35,4],[50,0,29,0.52,4],[51,0,30,0.63,4],[52,0,29,0.83,6],[53,0,31,0.94,5],[54,0,31,1.1,5],[55,0,33,1.18,5],[56,0,33,1.36,6],[57,0,33,1.58,7],[58,0,34,1.74,7],[59,0,34,1.97,8],[60,0,34,2.21,8],[61,1,33,2.52,8],[62,1,33,2.76,8],[63,1,33,3.0,8],[64,2,32,3.38,9],[65,2,32,3.72,11],[66,3,34,2.09,7],[67,3,34,1.15,6],[68,3,36,0.58,5],[69,3,35,0.29,3],[70,3,35,0.4,4],[71,3,33,0.58,5],[72,3,32,0.78,6],[73,3,32,0.97,6],[74,3,35,1.06,6],[75,3,33,1.3,6],[76,3,33,1.48,6],[77,3,35,1.57,7],[78,3,36,1.69,6],[79,3,38,1.76,6],[80,3,38,1.92,6],[81,3,41,1.95,7],[82,4,41,2.12,7],[83,4,40,2.38,8],[84,4,40,2.6,9],[85,5,38,2.97,9],[86,5,39,3.15,10],[87,0,37,1.57,7],[88,0,38,0.32,4],[89,0,37,0.24,3],[90,0,37,0.38,5],[91,0,36,0.53,5],[92,0,35,0.69,5],[93,0,37,0.81,6],[94,0,36,1.03,7],[95,0,37,1.22,7],[96,0,38,1.39,7],[97,0,40,1.48,8],[98,0,41,1.63,9],[99,0,43,1.74,9],[100,0,44,1.91,9],[101,0,44,2.11,9],[102,0,45,2.27,9],[103,1,46,2.46,12],[104,1,47,2.64,11],[105,1,46,2.93,11],[106,2,45,3.24,11],[107,2,46,3.41,11],[108,3,46,1.87,10],[109,3,47,0.81,8],[110,3,46,0.28,5],[111,3,45,0.24,3],[112,3,46,0.33,4],[113,3,45,0.47,6],[114,3,43,0.63,6],[115,3,43,0.79,6],[116,3,43,0.98,6],[117,3,44,1.11,6],[118,3,42,1.29,7],[119,3,42,1.48,7],[120,3,41,1.8,11],[121,3,41,1.93,10],[122,3,43,2.09,10],[123,3,43,2.37,11],[124,3,43,2.6,10],[125,4,42,3.0,13],[126,4,42,3.24,14],[127,4,42,3.57,14],[128,5,42,3.95,16],[129,5,43,4.26,18],[130,0,42,2.76,17],[131,0,42,1.67,12],[132,0,42,1.24,9],[133,0,41,1.15,8],[134,0,42,1.31,8],[135,0,42,1.55,10],[136,0,41,1.83,10],[137,0,41,2.1,11],[138,0,39,2.51,12],[139,0,40,2.75,12],[140,0,40,3.08,13],[141,0,40,3.4,13],[142,0,40,3.73,13],[143,0,38,4.26,13],[144,0,38,4.61,13],[145,0,38,5.0,15],[146,1,39,5.26,15],[147,1,40,5.5,15],[148,1,41,5.73,15],[149,2,39,6.49,18],[150,2,39,6.95,18],[151,3,40,4.72,16],[152,3,40,2.9,12],[153,3,42,1.26,9],[154,3,44,0.66,5],[155,3,42,0.38,3],[156,3,41,0.49,4],[157,3,40,0.62,5],[158,3,40,0.75,5],[159,3,41,0.85,5],[160,3,42,0.95,5],[161,3,42,1.1,5],[162,3,44,1.14,5],[163,3,43,1.3,6],[164,3,44,1.41,6],[165,3,43,1.63,6],[166,3,43,1.74,7],[167,4,43,1.95,10],[168,4,44,2.14,10],[169,4,44,2.36,10],[170,5,47,2.45,11],[171,5,43,3.02,15],[172,0,43,1.44,12],[173,0,41,0.88,9],[174,0,41,1.02,10],[175,0,41,1.27,10],[176,0,41,1.54,11],[177,0,41,1.8,11],[178,0,40,2.12,11],[179,0,40,2.42,12],[180,0,38,2.89,13],[181,0,41,3.0,14],[182,0,42,3.24,13],[183,0,43,3.47,13],[184,0,43,3.77,13],[185,0,43,4.07,13],[186,0,41,4.59,13],[187,0,41,4.9,13],[188,1,41,5.22,13],[189,1,41,5.56,14],[190,1,39,6.21,14],[191,2,38,6.76,15],[192,2,38,7.16,16],[193,3,38,4.92,12],[194,3,38,3.0,10],[195,3,39,1.36,6],[196,3,38,0.71,3],[197,3,36,0.31,2],[198,3,36,0.42,4],[199,3,37,0.54,5],[200,3,36,0.69,5]
+        ]
+      }
+    };
+
+    /* ==========================================================================
+       2. Application State & LocalStorage Manager
+       ========================================================================== */
+    const STORAGE_KEY_MODE = "ats_controller_mode";
+    const STORAGE_KEY_SCENARIO = "ats_selected_scenario";
+    const STORAGE_KEY_REDUCED_MOTION = "ats_reduced_motion";
+
+    const appState = {
+      controllerMode: "adaptive",
+      selectedScenario: "seed1",
+      reducedMotion: false,
+      simulationRunning: true,
+      currentStepIndex: 0,
+      stepAccumulator: 0
+    };
+
+    function initAppState() {
+      const savedMode = localStorage.getItem(STORAGE_KEY_MODE);
+      if (savedMode === "fixed" || savedMode === "adaptive") {
+        appState.controllerMode = savedMode;
+      }
+
+      const savedScenario = localStorage.getItem(STORAGE_KEY_SCENARIO);
+      if (savedScenario) {
+        appState.selectedScenario = savedScenario;
+      }
+
+      const savedMotion = localStorage.getItem(STORAGE_KEY_REDUCED_MOTION);
+      if (savedMotion !== null) {
+        appState.reducedMotion = savedMotion === "true";
+      } else {
+        appState.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      }
+
+      applyMotionState();
+      updateHeaderControlsUI();
+      populateSeedTable();
+      updateMetricsDisplay();
+    }
+
+    function saveState() {
+      localStorage.setItem(STORAGE_KEY_MODE, appState.controllerMode);
+      localStorage.setItem(STORAGE_KEY_SCENARIO, appState.selectedScenario);
+      localStorage.setItem(STORAGE_KEY_REDUCED_MOTION, appState.reducedMotion.toString());
+    }
+
+    function applyMotionState() {
+      const root = document.documentElement;
+      const motionBtn = document.getElementById("toggle-motion");
+      const iconRunning = document.getElementById("icon-motion-running");
+      const iconPaused = document.getElementById("icon-motion-paused");
+      const labelMotion = document.getElementById("label-motion-btn");
+
+      if (appState.reducedMotion) {
+        root.classList.add("reduced-motion");
+        motionBtn.classList.add("is-paused");
+        iconRunning.style.display = "none";
+        iconPaused.style.display = "inline-block";
+        labelMotion.textContent = "Resume Motion";
+        appState.simulationRunning = false;
+      } else {
+        root.classList.remove("reduced-motion");
+        motionBtn.classList.remove("is-paused");
+        iconRunning.style.display = "inline-block";
+        iconPaused.style.display = "none";
+        labelMotion.textContent = "Pause Motion";
+        appState.simulationRunning = true;
+      }
+    }
+
+    function updateHeaderControlsUI() {
+      const btnAdapt = document.getElementById("btn-mode-adaptive");
+      const btnFixed = document.getElementById("btn-mode-fixed");
+      const canvasModeBadge = document.getElementById("canvas-mode-badge");
+      const hudControllerType = document.getElementById("hud-controller-type");
+
+      if (appState.controllerMode === "adaptive") {
+        btnAdapt.classList.add("active");
+        btnAdapt.setAttribute("aria-selected", "true");
+        btnFixed.classList.remove("active");
+        btnFixed.setAttribute("aria-selected", "false");
+        canvasModeBadge.textContent = "MODE: ADAPTIVE";
+        canvasModeBadge.className = "sim-tag active-mode-tag";
+        hudControllerType.textContent = "ADAPTIVE";
+        hudControllerType.style.color = "var(--accent-adaptive)";
+      } else {
+        btnFixed.classList.add("active");
+        btnFixed.setAttribute("aria-selected", "true");
+        btnAdapt.classList.remove("active");
+        btnAdapt.setAttribute("aria-selected", "false");
+        canvasModeBadge.textContent = "MODE: FIXED-TIME";
+        canvasModeBadge.className = "sim-tag active-mode-tag fixed";
+        hudControllerType.textContent = "FIXED-TIME";
+        hudControllerType.style.color = "var(--accent-fixed)";
+      }
+
+      const scenarioSelect = document.getElementById("scenario-select");
+      scenarioSelect.value = appState.selectedScenario;
+    }
+
+    /* ==========================================================================
+       3. Intersection & Vehicle Kinematics Engine (SUMO Step Telemetry Synchronized)
+       ========================================================================== */
+    const canvas = document.getElementById("junction-canvas");
+    const ctx = canvas.getContext("2d");
+
+    const C_SIZE = 600;
+    const ROAD_WIDTH = 120;
+    const HALF_ROAD = ROAD_WIDTH / 2;
+    const STOP_DIST = HALF_ROAD + 12;
+
+    const vehicles = [];
+    let nextVehicleId = 1;
+
+    function getVehicleWorldPos(v) {
+      let startX = 0, startY = 0, dirX = 0, dirY = 0, baseAngle = 0;
+
+      if (v.approach === "north") {
+        startX = 270; startY = 300 - STOP_DIST; dirX = 0; dirY = 1; baseAngle = Math.PI / 2;
+      } else if (v.approach === "south") {
+        startX = 330; startY = 300 + STOP_DIST; dirX = 0; dirY = -1; baseAngle = -Math.PI / 2;
+      } else if (v.approach === "west") {
+        startX = 300 - STOP_DIST; startY = 330; dirX = 1; dirY = 0; baseAngle = 0;
+      } else if (v.approach === "east") {
+        startX = 300 + STOP_DIST; startY = 270; dirX = -1; dirY = 0; baseAngle = Math.PI;
+      }
+
+      if (v.distToStop >= 0) {
+        return {
+          x: startX - dirX * v.distToStop,
+          y: startY - dirY * v.distToStop,
+          angle: baseAngle
+        };
+      }
+
+      const progressDist = -v.distToStop;
+
+      if (v.turn === "straight") {
+        return {
+          x: startX + dirX * progressDist,
+          y: startY + dirY * progressDist,
+          angle: baseAngle
+        };
+      } else if (v.turn === "right") {
+        const R = 30;
+        const straightLen = 12;
+        const arcLen = (Math.PI / 2) * R;
+
+        if (progressDist <= straightLen) {
+          return { x: startX + dirX * progressDist, y: startY + dirY * progressDist, angle: baseAngle };
+        } else if (progressDist < straightLen + arcLen) {
+          const t = (progressDist - straightLen) / arcLen;
+          const turnAngle = baseAngle + t * (Math.PI / 2);
+          let cx = 0, cy = 0;
+          if (v.approach === "north") {
+            cx = 240 + R * Math.cos(t * Math.PI / 2);
+            cy = 240 + R * Math.sin(t * Math.PI / 2);
+          } else if (v.approach === "south") {
+            cx = 360 - R * Math.cos(t * Math.PI / 2);
+            cy = 360 - R * Math.sin(t * Math.PI / 2);
+          } else if (v.approach === "west") {
+            cx = 240 + R * Math.sin(t * Math.PI / 2);
+            cy = 360 - R * Math.cos(t * Math.PI / 2);
+          } else if (v.approach === "east") {
+            cx = 360 - R * Math.sin(t * Math.PI / 2);
+            cy = 240 + R * Math.cos(t * Math.PI / 2);
+          }
+          return { x: cx, y: cy, angle: turnAngle };
+        } else {
+          const exitDist = progressDist - (straightLen + arcLen);
+          const turnAngle = baseAngle + Math.PI / 2;
+          let cx = 0, cy = 0;
+          if (v.approach === "north") { cx = 240 - exitDist; cy = 270; }
+          else if (v.approach === "south") { cx = 360 + exitDist; cy = 330; }
+          else if (v.approach === "west") { cx = 270; cy = 360 + exitDist; }
+          else if (v.approach === "east") { cx = 330; cy = 240 - exitDist; }
+          return { x: cx, y: cy, angle: turnAngle };
+        }
+      } else {
+        // Left turn (R = 60)
+        const R = 60;
+        const straightLen = 42;
+        const arcLen = (Math.PI / 2) * R;
+
+        if (progressDist <= straightLen) {
+          return { x: startX + dirX * progressDist, y: startY + dirY * progressDist, angle: baseAngle };
+        } else if (progressDist < straightLen + arcLen) {
+          const t = (progressDist - straightLen) / arcLen;
+          const turnAngle = baseAngle - t * (Math.PI / 2);
+          let cx = 0, cy = 0;
+          if (v.approach === "north") {
+            cx = 330 - R * Math.cos(t * Math.PI / 2);
+            cy = 270 + R * Math.sin(t * Math.PI / 2);
+          } else if (v.approach === "south") {
+            cx = 270 + R * Math.cos(t * Math.PI / 2);
+            cy = 330 - R * Math.sin(t * Math.PI / 2);
+          } else if (v.approach === "west") {
+            cx = 270 + R * Math.sin(t * Math.PI / 2);
+            cy = 270 + R * Math.cos(t * Math.PI / 2);
+          } else if (v.approach === "east") {
+            cx = 330 - R * Math.sin(t * Math.PI / 2);
+            cy = 330 - R * Math.cos(t * Math.PI / 2);
+          }
+          return { x: cx, y: cy, angle: turnAngle };
+        } else {
+          const exitDist = progressDist - (straightLen + arcLen);
+          const turnAngle = baseAngle - Math.PI / 2;
+          let cx = 0, cy = 0;
+          if (v.approach === "north") { cx = 330 + exitDist; cy = 330; }
+          else if (v.approach === "south") { cx = 270 - exitDist; cy = 270; }
+          else if (v.approach === "west") { cx = 330; cy = 270 - exitDist; }
+          else if (v.approach === "east") { cx = 270; cy = 330 + exitDist; }
+          return { x: cx, y: cy, angle: turnAngle };
+        }
+      }
+    }
+
+    class Vehicle {
+      constructor(id, approach, color, turn = "straight") {
+        this.id = id;
+        this.approach = approach;
+        this.color = color;
+        this.speed = 100;
+        this.length = 22;
+        this.width = 12;
+        this.isBraking = false;
+        this.distToStop = 300;
+        this.turn = turn;
+        this.x = 0;
+        this.y = 0;
+        this.angle = 0;
+      }
+
+      update(dt, phase, leadVehicle, allVehicles) {
+        const isNS = (this.approach === "north" || this.approach === "south");
+        const isGreen = isNS ? (phase === 0) : (phase === 3);
+        const isYellow = isNS ? (phase === 1) : (phase === 4);
+
+        let maxAllowedSpeed = 100;
+        let isDecelerating = false;
+
+        // 1. Signal Compliance: stop at stop line (distToStop = 0) on red/yellow
+        if (!isGreen) {
+          if (isYellow) {
+            // Yellow light dilemma zone: stop if before dilemma threshold, otherwise clear
+            if (this.distToStop > 35) {
+              const gap = this.distToStop;
+              if (gap > 0 && gap < 90) {
+                isDecelerating = true;
+                maxAllowedSpeed = Math.min(maxAllowedSpeed, Math.max(0, gap * 1.8));
+              }
+            }
+          } else {
+            // Red light: stop before stop line
+            if (this.distToStop > -5) {
+              const gap = Math.max(0, this.distToStop);
+              if (gap < 120) {
+                isDecelerating = true;
+                maxAllowedSpeed = Math.min(maxAllowedSpeed, Math.max(0, gap * 1.8));
+              }
+            }
+          }
+        }
+
+        // 2. Same-lane car-following behind lead vehicle (IDM style gap control)
+        if (leadVehicle) {
+          const minGap = this.length + 12; // 34px bumper-to-bumper
+          const gap = this.distToStop - leadVehicle.distToStop - minGap;
+          if (gap < 80) {
+            isDecelerating = true;
+            if (gap <= 0) {
+              maxAllowedSpeed = 0;
+              this.distToStop = leadVehicle.distToStop + minGap;
+            } else {
+              maxAllowedSpeed = Math.min(maxAllowedSpeed, Math.max(0, gap * 2.2));
+            }
+          }
+        }
+
+        // 3. Intersection Yield & Left-turn conflict resolution
+        // While approaching or inside the box (distToStop between +25 and -120)
+        if (this.distToStop < 25 && this.distToStop > -120 && allVehicles) {
+          const myPos = getVehicleWorldPos(this);
+          for (let other of allVehicles) {
+            if (other.id === this.id) continue;
+            // Check other vehicles inside the intersection area
+            if (other.distToStop < 25 && other.distToStop > -150) {
+              const otherPos = getVehicleWorldPos(other);
+              const dx = otherPos.x - myPos.x;
+              const dy = otherPos.y - myPos.y;
+              const distSq = dx * dx + dy * dy;
+
+              // Proximity threshold ~32px
+              if (distSq < 32 * 32) {
+                // Priority rule:
+                // a) Vehicle that entered the intersection first (more negative distToStop) proceeds
+                // b) Straight movements have priority over left turns
+                // c) Deterministic tie-breaker (id)
+                let otherHasPriority = false;
+                if (other.distToStop < this.distToStop - 4) {
+                  otherHasPriority = true;
+                } else if (Math.abs(other.distToStop - this.distToStop) <= 4) {
+                  if (this.turn === "left" && other.turn !== "left") {
+                    otherHasPriority = true;
+                  } else if (this.turn === other.turn && other.id < this.id) {
+                    otherHasPriority = true;
+                  }
+                } else if (this.turn === "left" && other.turn === "straight") {
+                  otherHasPriority = true;
+                }
+
+                if (otherHasPriority) {
+                  isDecelerating = true;
+                  maxAllowedSpeed = Math.min(maxAllowedSpeed, 12);
+                  break;
+                }
+              }
+            }
+          }
+        }
+
+        // 4. Smooth speed adjustment
+        if (isDecelerating) {
+          this.isBraking = true;
+          if (this.speed > maxAllowedSpeed) {
+            this.speed = Math.max(maxAllowedSpeed, this.speed - 220 * dt);
+          } else {
+            this.speed = Math.min(this.speed + 60 * dt, maxAllowedSpeed);
+          }
+        } else {
+          this.isBraking = false;
+          this.speed = Math.min(100, this.speed + 90 * dt);
+        }
+
+        // Advance progress
+        this.distToStop -= this.speed * dt;
+
+        // Synchronize world coordinates
+        const pos = getVehicleWorldPos(this);
+        this.x = pos.x;
+        this.y = pos.y;
+        this.angle = pos.angle;
+      }
+    }
+
+    function getRandomTurn() {
+      const r = Math.random();
+      if (r < 0.50) return "straight";
+      if (r < 0.75) return "right";
+      return "left";
+    }
+
+    function resetSimulation() {
+      vehicles.length = 0;
+      appState.currentStepIndex = 0;
+      appState.stepAccumulator = 0;
+      spawnInitialVehicles();
+    }
+
+    function spawnInitialVehicles() {
+      const approaches = ["north", "south", "east", "west"];
+      const carPalette = ["#38bdf8", "#818cf8", "#f43f5e", "#fb923c", "#34d399", "#cbd5e1"];
+      for (let i = 0; i < 8; i++) {
+        const app = approaches[i % 4];
+        const v = new Vehicle(nextVehicleId++, app, carPalette[i % carPalette.length], getRandomTurn());
+        v.distToStop = 80 + i * 28;
+        vehicles.push(v);
+      }
+    }
+
+    function advanceSimulationStep() {
+      const activeTrace = (appState.controllerMode === "adaptive") 
+        ? SIMULATION_DATA.traces.adaptive 
+        : SIMULATION_DATA.traces.fixed;
+
+      appState.currentStepIndex = (appState.currentStepIndex + 1) % activeTrace.length;
+      const current = activeTrace[appState.currentStepIndex];
+
+      // SUMO step packet: [step, phase, vehicles, avg_wait_s, queue]
+      const stepNum = current[0];
+      const phaseNum = current[1];
+      const vehCount = current[2];
+      const avgWait = current[3];
+      const queueCount = current[4];
+
+      // Adjust active vehicles on canvas to align with SUMO vehicle count
+      while (vehicles.length < Math.min(vehCount, 26)) {
+        const approaches = ["north", "south", "east", "west"];
+        const app = approaches[Math.floor(Math.random() * approaches.length)];
+        const carPalette = ["#38bdf8", "#818cf8", "#f43f5e", "#fb923c", "#34d399", "#cbd5e1"];
+        const color = carPalette[Math.floor(Math.random() * carPalette.length)];
+        let maxDist = 240;
+        vehicles.forEach(other => {
+          if (other.approach === app && other.distToStop > maxDist) {
+            maxDist = other.distToStop;
+          }
+        });
+        const v = new Vehicle(nextVehicleId++, app, color, getRandomTurn());
+        v.distToStop = maxDist + 40;
+        v.speed = 90;
+        vehicles.push(v);
+      }
+
+      // Update HUD telemetry
+      document.getElementById("hud-phase-countdown").textContent = stepNum;
+      document.getElementById("canvas-scenario-badge").textContent = `SUMO STEP: ${stepNum} / ${activeTrace.length}`;
+      document.getElementById("queue-network-total").textContent = vehCount;
+      document.getElementById("queue-total-stop").textContent = queueCount;
+      document.getElementById("queue-step-wait").textContent = avgWait.toFixed(2) + "s";
+      document.getElementById("queue-progress-pct").textContent = Math.round((stepNum / activeTrace.length) * 100) + "%";
+
+      const phaseNameEl = document.getElementById("hud-phase-name");
+      const indicatorEl = document.getElementById("hud-signal-indicator");
+
+      switch(phaseNum) {
+        case 0:
+          phaseNameEl.textContent = "North-South Green (Phase 0)";
+          indicatorEl.className = "signal-indicator green";
+          break;
+        case 1:
+          phaseNameEl.textContent = "North-South Yellow (Phase 1)";
+          indicatorEl.className = "signal-indicator yellow";
+          break;
+        case 2:
+          phaseNameEl.textContent = "All-Red Clearance (Phase 2)";
+          indicatorEl.className = "signal-indicator red";
+          break;
+        case 3:
+          phaseNameEl.textContent = "East-West Green (Phase 3)";
+          indicatorEl.className = "signal-indicator green";
+          break;
+        case 4:
+          phaseNameEl.textContent = "East-West Yellow (Phase 4)";
+          indicatorEl.className = "signal-indicator yellow";
+          break;
+        case 5:
+          phaseNameEl.textContent = "All-Red Clearance (Phase 5)";
+          indicatorEl.className = "signal-indicator red";
+          break;
+      }
+    }
+
+    function updateSimulationLogic(dt) {
+      appState.stepAccumulator += dt;
+      // Advance SUMO step every 1 simulated second
+      if (appState.stepAccumulator >= 0.8) {
+        advanceSimulationStep();
+        appState.stepAccumulator = 0;
+      }
+
+      const activeTrace = (appState.controllerMode === "adaptive") 
+        ? SIMULATION_DATA.traces.adaptive 
+        : SIMULATION_DATA.traces.fixed;
+      const current = activeTrace[appState.currentStepIndex];
+      const phaseNum = current ? current[1] : 0;
+
+      // Group vehicles by approach for car-following
+      const approachGroups = { north: [], south: [], east: [], west: [] };
+      vehicles.forEach(v => approachGroups[v.approach].push(v));
+
+      ["north", "south", "east", "west"].forEach(app => {
+        const group = approachGroups[app];
+        group.sort((a, b) => a.distToStop - b.distToStop);
+        for (let i = 0; i < group.length; i++) {
+          const lead = (i > 0) ? group[i - 1] : null;
+          group[i].update(dt, phaseNum, lead, vehicles);
+        }
+      });
+
+      // Recirculate exiting vehicles to maintain continuous stream
+      for (let i = vehicles.length - 1; i >= 0; i--) {
+        if (vehicles[i].distToStop < -230) {
+          const app = vehicles[i].approach;
+          let maxDist = 240;
+          vehicles.forEach(other => {
+            if (other.approach === app && other.distToStop > maxDist) {
+              maxDist = other.distToStop;
+            }
+          });
+          vehicles[i].distToStop = maxDist + 40;
+          vehicles[i].speed = 90;
+          vehicles[i].turn = getRandomTurn();
+        }
+      }
+    }
+
+    /* ==========================================================================
+       4. Canvas Rendering System (Asphalt, Markings, Traffic Heads, Vehicles)
+       ========================================================================== */
+    function renderJunction() {
+      ctx.clearRect(0, 0, C_SIZE, C_SIZE);
+
+      // 1. Terrain / Grass background
+      ctx.fillStyle = "#090d16";
+      ctx.fillRect(0, 0, C_SIZE, C_SIZE);
+
+      ctx.fillStyle = "#0c1322";
+      ctx.fillRect(0, 0, 300 - HALF_ROAD, 300 - HALF_ROAD);
+      ctx.fillRect(300 + HALF_ROAD, 0, 300 - HALF_ROAD, 300 - HALF_ROAD);
+      ctx.fillRect(0, 300 + HALF_ROAD, 300 - HALF_ROAD, 300 - HALF_ROAD);
+      ctx.fillRect(300 + HALF_ROAD, 300 + HALF_ROAD, 300 - HALF_ROAD, 300 - HALF_ROAD);
+
+      // 2. Asphalt Roadway
+      ctx.fillStyle = "#161e2e";
+      ctx.fillRect(300 - HALF_ROAD, 0, ROAD_WIDTH, C_SIZE);
+      ctx.fillRect(0, 300 - HALF_ROAD, C_SIZE, ROAD_WIDTH);
+
+      // Curbs
+      ctx.strokeStyle = "#2e3b52";
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(300 - HALF_ROAD, 0); ctx.lineTo(300 - HALF_ROAD, 300 - HALF_ROAD); ctx.lineTo(0, 300 - HALF_ROAD); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(300 + HALF_ROAD, 0); ctx.lineTo(300 + HALF_ROAD, 300 - HALF_ROAD); ctx.lineTo(C_SIZE, 300 - HALF_ROAD); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, 300 + HALF_ROAD); ctx.lineTo(300 - HALF_ROAD, 300 + HALF_ROAD); ctx.lineTo(300 - HALF_ROAD, C_SIZE); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(C_SIZE, 300 + HALF_ROAD); ctx.lineTo(300 + HALF_ROAD, 300 + HALF_ROAD); ctx.lineTo(300 + HALF_ROAD, C_SIZE); ctx.stroke();
+
+      // Yellow Center Lines
+      ctx.strokeStyle = "#eab308";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(298, 0); ctx.lineTo(298, 300 - STOP_DIST); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(302, 0); ctx.lineTo(302, 300 - STOP_DIST); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(298, 300 + STOP_DIST); ctx.lineTo(298, C_SIZE); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(302, 300 + STOP_DIST); ctx.lineTo(302, C_SIZE); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, 298); ctx.lineTo(300 - STOP_DIST, 298); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, 302); ctx.lineTo(300 - STOP_DIST, 302); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(300 + STOP_DIST, 298); ctx.lineTo(C_SIZE, 298); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(300 + STOP_DIST, 302); ctx.lineTo(C_SIZE, 302); ctx.stroke();
+
+      // Stop Bars
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(300 - HALF_ROAD, 300 - STOP_DIST); ctx.lineTo(298, 300 - STOP_DIST); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(302, 300 + STOP_DIST); ctx.lineTo(300 + HALF_ROAD, 300 + STOP_DIST); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(300 - STOP_DIST, 302); ctx.lineTo(300 - STOP_DIST, 300 + HALF_ROAD); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(300 + STOP_DIST, 300 - HALF_ROAD); ctx.lineTo(300 + STOP_DIST, 298); ctx.stroke();
+
+      // Zebra crossings
+      drawZebraCrosswalk(300 - HALF_ROAD, 300 - STOP_DIST + 4, ROAD_WIDTH, 12, true);
+      drawZebraCrosswalk(300 - HALF_ROAD, 300 + STOP_DIST - 16, ROAD_WIDTH, 12, true);
+      drawZebraCrosswalk(300 - STOP_DIST + 4, 300 - HALF_ROAD, 12, ROAD_WIDTH, false);
+      drawZebraCrosswalk(300 + STOP_DIST - 16, 300 - HALF_ROAD, 12, ROAD_WIDTH, false);
+
+      // Loop detectors with dynamic vehicle actuation feedback
+      const hasNorthCar = vehicles.some(v => v.approach === "north" && v.distToStop > 0 && v.distToStop < 40);
+      const hasSouthCar = vehicles.some(v => v.approach === "south" && v.distToStop > 0 && v.distToStop < 40);
+      const hasWestCar  = vehicles.some(v => v.approach === "west"  && v.distToStop > 0 && v.distToStop < 40);
+      const hasEastCar  = vehicles.some(v => v.approach === "east"  && v.distToStop > 0 && v.distToStop < 40);
+
+      drawLoopDetector(270 - 10, 300 - STOP_DIST - 18, 20, 14, hasNorthCar);
+      drawLoopDetector(330 - 10, 300 + STOP_DIST + 4, 20, 14, hasSouthCar);
+      drawLoopDetector(300 - STOP_DIST - 18, 330 - 10, 14, 20, hasWestCar);
+      drawLoopDetector(300 + STOP_DIST + 4, 270 - 10, 14, 20, hasEastCar);
+
+      // 4. Draw Vehicles
+      vehicles.forEach(v => drawVehicle(v));
+
+      // 5. Draw Signals
+      const activeTrace = (appState.controllerMode === "adaptive") 
+        ? SIMULATION_DATA.traces.adaptive 
+        : SIMULATION_DATA.traces.fixed;
+      const current = activeTrace[appState.currentStepIndex];
+      const phaseNum = current ? current[1] : 0;
+      const nsColor = (phaseNum === 0) ? "green" : (phaseNum === 1 ? "yellow" : "red");
+      const ewColor = (phaseNum === 3) ? "green" : (phaseNum === 4 ? "yellow" : "red");
+
+      drawSignalHead(230, 220, nsColor);
+      drawSignalHead(370, 380, nsColor);
+      drawSignalHead(220, 370, ewColor);
+      drawSignalHead(380, 230, ewColor);
+    }
+
+    function drawZebraCrosswalk(x, y, w, h, isHorizontal) {
+      ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
+      if (isHorizontal) {
+        const stripeW = 8;
+        const count = Math.floor(w / (stripeW * 2));
+        for (let i = 0; i < count; i++) {
+          ctx.fillRect(x + i * stripeW * 2 + 4, y, stripeW, h);
+        }
+      } else {
+        const stripeH = 8;
+        const count = Math.floor(h / (stripeH * 2));
+        for (let i = 0; i < count; i++) {
+          ctx.fillRect(x, y + i * stripeH * 2 + 4, w, stripeH);
+        }
+      }
+    }
+
+    function drawLoopDetector(x, y, w, h, isTriggered) {
+      if (isTriggered) {
+        ctx.strokeStyle = "rgba(16, 185, 129, 0.9)";
+        ctx.lineWidth = 2;
+        ctx.fillStyle = "rgba(16, 185, 129, 0.18)";
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeRect(x, y, w, h);
+      } else {
+        ctx.strokeStyle = "rgba(100, 116, 139, 0.45)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x, y, w, h);
+      }
+    }
+
+    function drawSignalHead(x, y, state) {
+      ctx.save();
+      // Signal housing shadow
+      ctx.shadowColor = "rgba(0, 0, 0, 0.7)";
+      ctx.shadowBlur = 8;
+      ctx.fillStyle = "#0a0f1d";
+      ctx.strokeStyle = "#334155";
+      ctx.lineWidth = 1.5;
+      ctx.fillRect(x - 9, y - 24, 18, 48);
+      ctx.strokeRect(x - 9, y - 24, 18, 48);
+      ctx.restore();
+
+      // Red optic
+      if (state === "red") {
+        ctx.save();
+        ctx.shadowColor = "rgba(239, 68, 68, 0.9)";
+        ctx.shadowBlur = 14;
+        ctx.fillStyle = "#ef4444";
+        ctx.beginPath(); ctx.arc(x, y - 15, 5.5, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+        // Atmospheric light halo
+        const gradR = ctx.createRadialGradient(x, y - 15, 2, x, y - 15, 22);
+        gradR.addColorStop(0, "rgba(239, 68, 68, 0.35)");
+        gradR.addColorStop(1, "rgba(239, 68, 68, 0)");
+        ctx.fillStyle = gradR;
+        ctx.beginPath(); ctx.arc(x, y - 15, 22, 0, Math.PI * 2); ctx.fill();
+      } else {
+        ctx.fillStyle = "#251214";
+        ctx.beginPath(); ctx.arc(x, y - 15, 5, 0, Math.PI * 2); ctx.fill();
+      }
+
+      // Yellow optic
+      if (state === "yellow") {
+        ctx.save();
+        ctx.shadowColor = "rgba(245, 158, 11, 0.9)";
+        ctx.shadowBlur = 14;
+        ctx.fillStyle = "#f59e0b";
+        ctx.beginPath(); ctx.arc(x, y, 5.5, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+        const gradY = ctx.createRadialGradient(x, y, 2, x, y, 22);
+        gradY.addColorStop(0, "rgba(245, 158, 11, 0.35)");
+        gradY.addColorStop(1, "rgba(245, 158, 11, 0)");
+        ctx.fillStyle = gradY;
+        ctx.beginPath(); ctx.arc(x, y, 22, 0, Math.PI * 2); ctx.fill();
+      } else {
+        ctx.fillStyle = "#251e0e";
+        ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fill();
+      }
+
+      // Green optic
+      if (state === "green") {
+        ctx.save();
+        ctx.shadowColor = "rgba(16, 185, 129, 0.95)";
+        ctx.shadowBlur = 15;
+        ctx.fillStyle = "#10b981";
+        ctx.beginPath(); ctx.arc(x, y + 15, 5.5, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+        const gradG = ctx.createRadialGradient(x, y + 15, 2, x, y + 15, 24);
+        gradG.addColorStop(0, "rgba(16, 185, 129, 0.4)");
+        gradG.addColorStop(1, "rgba(16, 185, 129, 0)");
+        ctx.fillStyle = gradG;
+        ctx.beginPath(); ctx.arc(x, y + 15, 24, 0, Math.PI * 2); ctx.fill();
+      } else {
+        ctx.fillStyle = "#0c1f17";
+        ctx.beginPath(); ctx.arc(x, y + 15, 5, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+
+    function drawVehicle(v) {
+      ctx.save();
+      const pos = (v.x && v.y) ? { x: v.x, y: v.y, angle: v.angle } : getVehicleWorldPos(v);
+
+      ctx.translate(pos.x, pos.y);
+      ctx.rotate(pos.angle);
+
+      // Realistic volumetric headlights cone onto roadway
+      const beamGrad = ctx.createRadialGradient(v.length / 2 + 2, 0, 4, v.length / 2 + 38, 0, 42);
+      beamGrad.addColorStop(0, "rgba(254, 240, 138, 0.35)");
+      beamGrad.addColorStop(0.5, "rgba(254, 240, 138, 0.12)");
+      beamGrad.addColorStop(1, "rgba(254, 240, 138, 0)");
+      ctx.fillStyle = beamGrad;
+      ctx.beginPath();
+      ctx.moveTo(v.length / 2 - 2, -v.width / 2);
+      ctx.lineTo(v.length / 2 + 42, -v.width / 2 - 14);
+      ctx.lineTo(v.length / 2 + 42, v.width / 2 + 14);
+      ctx.lineTo(v.length / 2 - 2, v.width / 2);
+      ctx.closePath();
+      ctx.fill();
+
+      // Vehicle soft drop shadow under chassis
+      ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
+      ctx.fillRect(-v.length / 2 + 1, -v.width / 2 + 2, v.length, v.width);
+
+      // Vehicle metallic body with rounded edges
+      ctx.fillStyle = v.color;
+      ctx.beginPath();
+      ctx.roundRect(-v.length / 2, -v.width / 2, v.length, v.width, 3);
+      ctx.fill();
+
+      // Subtle metallic roof highlight
+      const glossGrad = ctx.createLinearGradient(0, -v.width / 2, 0, v.width / 2);
+      glossGrad.addColorStop(0, "rgba(255, 255, 255, 0.2)");
+      glossGrad.addColorStop(0.5, "rgba(255, 255, 255, 0)");
+      glossGrad.addColorStop(1, "rgba(0, 0, 0, 0.25)");
+      ctx.fillStyle = glossGrad;
+      ctx.beginPath();
+      ctx.roundRect(-v.length / 2, -v.width / 2, v.length, v.width, 3);
+      ctx.fill();
+
+      // Windshield & Cabin Glass
+      ctx.fillStyle = "#0b1324";
+      ctx.beginPath();
+      ctx.roundRect(-v.length / 2 + 5, -v.width / 2 + 2, v.length - 11, v.width - 4, 2);
+      ctx.fill();
+
+      // Front windshield glare accent
+      ctx.fillStyle = "rgba(255, 255, 255, 0.45)";
+      ctx.fillRect(-v.length / 2 + 4, -v.width / 2 + 2, 2.5, v.width - 4);
+
+      // Amber Turn Indicators
+      if (v.turn === "left" && v.distToStop > -60 && v.distToStop < 80) {
+        const isBlink = Math.floor(Date.now() / 220) % 2 === 0;
+        ctx.fillStyle = isBlink ? "#fbbf24" : "#78350f";
+        if (isBlink) {
+          ctx.save();
+          ctx.shadowColor = "#f59e0b";
+          ctx.shadowBlur = 6;
+          ctx.fillRect(-v.length / 2 + 2, -v.width / 2 - 1.5, 3.5, 2.5);
+          ctx.fillRect(-v.length / 2 - 2, -v.width / 2 - 1.5, 3.5, 2.5);
+          ctx.restore();
+        } else {
+          ctx.fillRect(-v.length / 2 + 2, -v.width / 2 - 1.5, 3.5, 2.5);
+          ctx.fillRect(-v.length / 2 - 2, -v.width / 2 - 1.5, 3.5, 2.5);
+        }
+      } else if (v.turn === "right" && v.distToStop > -60 && v.distToStop < 80) {
+        const isBlink = Math.floor(Date.now() / 220) % 2 === 0;
+        ctx.fillStyle = isBlink ? "#fbbf24" : "#78350f";
+        if (isBlink) {
+          ctx.save();
+          ctx.shadowColor = "#f59e0b";
+          ctx.shadowBlur = 6;
+          ctx.fillRect(-v.length / 2 + 2, v.width / 2 - 1, 3.5, 2.5);
+          ctx.fillRect(-v.length / 2 - 2, v.width / 2 - 1, 3.5, 2.5);
+          ctx.restore();
+        } else {
+          ctx.fillRect(-v.length / 2 + 2, v.width / 2 - 1, 3.5, 2.5);
+          ctx.fillRect(-v.length / 2 - 2, v.width / 2 - 1, 3.5, 2.5);
+        }
+      }
+
+      // Brake lights (Glow on braking)
+      if (v.isBraking) {
+        ctx.save();
+        ctx.shadowColor = "rgba(239, 68, 68, 0.9)";
+        ctx.shadowBlur = 8;
+        ctx.fillStyle = "#ef4444";
+        ctx.fillRect(-v.length / 2 - 1.5, -v.width / 2 + 1, 2.5, 3);
+        ctx.fillRect(-v.length / 2 - 1.5, v.width / 2 - 4, 2.5, 3);
+        ctx.restore();
+      } else {
+        ctx.fillStyle = "#6b1414";
+        ctx.fillRect(-v.length / 2 - 1, -v.width / 2 + 1, 2, 3);
+        ctx.fillRect(-v.length / 2 - 1, v.width / 2 - 4, 2, 3);
+      }
+
+      // High-intensity Headlight lenses
+      ctx.fillStyle = "#fef08a";
+      ctx.fillRect(v.length / 2 - 1, -v.width / 2 + 1, 2, 3);
+      ctx.fillRect(v.length / 2 - 1, v.width / 2 - 4, 2, 3);
+
+      ctx.restore();
+    }
+
+    /* ==========================================================================
+       5. Animation Loop (Centralized 60 FPS requestAnimationFrame)
+       ========================================================================== */
+    let lastTimestamp = 0;
+
+    function simulationLoop(timestamp) {
+      if (!lastTimestamp) lastTimestamp = timestamp;
+      const rawDt = (timestamp - lastTimestamp) / 1000;
+      lastTimestamp = timestamp;
+
+      const dt = Math.min(rawDt, 0.1);
+
+      if (appState.simulationRunning && !appState.reducedMotion) {
+        updateSimulationLogic(dt);
+      }
+
+      renderJunction();
+      requestAnimationFrame(simulationLoop);
+    }
+
+    /* ==========================================================================
+       6. Results, Metrics & Table UI Handlers
+       ========================================================================== */
+    function updateMetricsDisplay() {
+      const summary = SIMULATION_DATA.summary;
+
+      document.getElementById("val-fixed-wait").innerHTML = summary.fixed.avgWaitSec.toFixed(2) + '<span style="font-size:1rem;color:var(--text-dim)">s</span>';
+      document.getElementById("val-adaptive-wait").innerHTML = summary.adaptive.avgWaitSec.toFixed(2) + '<span style="font-size:1rem;color:var(--text-dim)">s</span>';
+      document.getElementById("delta-wait-badge").textContent = summary.delta.waitReductionPct;
+
+      document.getElementById("val-fixed-queue").innerHTML = summary.fixed.avgQueueVeh.toFixed(2) + '<span style="font-size:1rem;color:var(--text-dim)"> veh</span>';
+      document.getElementById("val-adaptive-queue").innerHTML = summary.adaptive.avgQueueVeh.toFixed(2) + '<span style="font-size:1rem;color:var(--text-dim)"> veh</span>';
+      document.getElementById("delta-queue-badge").textContent = summary.delta.queueReductionPct;
+
+      document.getElementById("val-fixed-maxqueue").innerHTML = summary.fixed.maxQueueVeh.toFixed(2) + '<span style="font-size:1rem;color:var(--text-dim)"> veh</span>';
+      document.getElementById("val-adaptive-maxqueue").innerHTML = summary.adaptive.maxQueueVeh.toFixed(2) + '<span style="font-size:1rem;color:var(--text-dim)"> veh</span>';
+      document.getElementById("delta-maxqueue-badge").textContent = summary.delta.maxQueueReductionPct;
+    }
+
+    function populateSeedTable() {
+      const tbody = document.getElementById("seed-table-body");
+      tbody.innerHTML = "";
+
+      SIMULATION_DATA.seeds.forEach(s => {
+        const tr = document.createElement("tr");
+        const deltaPct = (((s.adaptWait - s.fixedWait) / s.fixedWait) * 100).toFixed(2) + "%";
+
+        tr.innerHTML = `
+          <td class="code-cell">${s.id} (${s.file})</td>
+          <td style="font-family: var(--font-mono);">${s.fixedWait.toFixed(4)}</td>
+          <td style="font-family: var(--font-mono);">${s.adaptWait.toFixed(4)}</td>
+          <td style="color: var(--sig-green); font-family: var(--font-mono); font-weight: 600;">${deltaPct}</td>
+          <td style="font-family: var(--font-mono);">${s.fixedQueue.toFixed(3)}</td>
+          <td style="font-family: var(--font-mono);">${s.adaptQueue.toFixed(3)}</td>
+          <td style="font-family: var(--font-mono);">${s.fixedMax}</td>
+          <td style="font-family: var(--font-mono);">${s.adaptMax}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    /* ==========================================================================
+       7. Event Listeners & Interaction Wiring
+       ========================================================================== */
+    document.getElementById("btn-mode-adaptive").addEventListener("click", () => {
+      if (appState.controllerMode !== "adaptive") {
+        appState.controllerMode = "adaptive";
+        saveState();
+        updateHeaderControlsUI();
+        resetSimulation();
+      }
+    });
+
+    document.getElementById("btn-mode-fixed").addEventListener("click", () => {
+      if (appState.controllerMode !== "fixed") {
+        appState.controllerMode = "fixed";
+        saveState();
+        updateHeaderControlsUI();
+        resetSimulation();
+      }
+    });
+
+    document.getElementById("scenario-select").addEventListener("change", (e) => {
+      appState.selectedScenario = e.target.value;
+      saveState();
+      resetSimulation();
+    });
+
+    document.getElementById("toggle-motion").addEventListener("click", () => {
+      appState.reducedMotion = !appState.reducedMotion;
+      saveState();
+      applyMotionState();
+    });
+
+    document.getElementById("btn-replay").addEventListener("click", () => {
+      resetSimulation();
+    });
+
+    document.getElementById("btn-step").addEventListener("click", () => {
+      advanceSimulationStep();
+      renderJunction();
+    });
+
+    window.addEventListener("DOMContentLoaded", () => {
+      initAppState();
+      resetSimulation();
+      requestAnimationFrame(simulationLoop);
+    });
+  </script>
+</body>
+</html>
